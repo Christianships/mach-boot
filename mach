@@ -1,0 +1,40 @@
+#!/bin/bash
+# MACH intro: ./mach (play) · ./mach build · ./mach preview · ./mach install · ./mach uninstall
+set -e
+cd "$(dirname "$(readlink -f "$0")")"
+LABEL=dev.mach.intro
+PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
+case "${1:-play}" in
+  build)
+    python3 gen_sounds.py
+    swiftc -O -swift-version 5 -framework Cocoa -framework WebKit -framework AVFoundation app/main.swift -o bin/mach-intro
+    ;;
+  preview) open -a Helium "file://$PWD/intro/index.html?preview=1" ;;
+  install)
+    mkdir -p "${PLIST%/*}"
+    cat > "$PLIST" <<PL
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>$LABEL</string>
+  <key>ProgramArguments</key>
+  <array><string>/bin/bash</string><string>$PWD/login.sh</string></array>
+  <key>RunAtLoad</key><true/>
+  <key>LimitLoadToSessionType</key><string>Aqua</string>
+  <key>StandardOutPath</key><string>/tmp/mach-intro.log</string>
+  <key>StandardErrorPath</key><string>/tmp/mach-intro.log</string>
+</dict>
+</plist>
+PL
+    launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
+    launchctl bootstrap "gui/$(id -u)" "$PLIST"
+    echo "installed: plays on the first login after each boot"
+    ;;
+  uninstall)
+    launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
+    rm -f "$PLIST"
+    echo "uninstalled"
+    ;;
+  *) exec ./bin/mach-intro ;;
+esac

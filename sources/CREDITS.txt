@@ -1,0 +1,3 @@
+Recordings used by gen_sounds.py (all CC0 / public domain):
+- f15-flyover_klangfabrik_324370.mp3 "F15 Eagle flyover.wav" by klangfabrik  https://freesound.org/people/klangfabrik/sounds/324370/
+- sonic-boom_qubodup_182050.mp3 "Sonic Boom" by qubodup       https://freesound.org/people/qubodup/sounds/182050/
