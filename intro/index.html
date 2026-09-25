@@ -1,0 +1,20 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>MACH</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: transparent; }
+  body.preview { background: #1b2233 url(preview-bg.svg) center / cover; cursor: pointer; }
+  canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; }
+  #hud { position: fixed; left: 16px; bottom: 14px; font: 12px ui-monospace, Menlo, monospace;
+         color: #cfe; opacity: .7; display: none; }
+  body.preview #hud { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud">click = replay with sound</div>
+<script src="mach.js"></script>
+</body>
+</html>
