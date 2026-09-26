@@ -1,0 +1,73 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>__NAME__</title>
+<style>
+  /* The player draws this page in a transparent overlay over the desktop,
+     so leave the background transparent. .preview is added for ./mach
+     preview and ./mach gif, which have no desktop behind them; ./mach gif
+     also adds .recording, for hiding preview-only hints. */
+  html, body { margin: 0; height: 100%; overflow: hidden; background: transparent; }
+  body.preview { background: #111; }
+  canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Screen contract (see README):
+//   MACH.start()      begin playing; the player calls this and starts sound.wav
+//   __seek(t)         draw the frame at t seconds (used by ./mach gif)
+//   post 'done'       tell the player the animation has finished
+(() => {
+  const DURATION = 3.0; // keep in sync with screen.json
+  const c = document.getElementById('c'), g = c.getContext('2d');
+  let W, H;
+  function setup() {
+    const dpr = devicePixelRatio || 1;
+    W = innerWidth; H = innerHeight;
+    c.width = W * dpr; c.height = H * dpr;
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  // Draw frame t (seconds). Keep it a pure function of t so __seek works.
+  function render(t) {
+    g.clearRect(0, 0, W, H);
+    if (t < 0) return;
+    const a = Math.min(1, t / 0.6) * Math.min(1, (DURATION - t) / 0.6);
+    g.globalAlpha = Math.max(0, a);
+    g.fillStyle = '#fff';
+    g.font = '600 96px ui-monospace, Menlo, monospace';
+    g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillText('__NAME__', W / 2, H / 2);
+    g.globalAlpha = 1;
+  }
+
+  let t0 = null;
+  function frame(now) {
+    const t = (now - t0) / 1000;
+    if (t > DURATION) { render(-1); done(); return; }
+    render(t);
+    requestAnimationFrame(frame);
+  }
+  function done() {
+    window.webkit?.messageHandlers?.mach?.postMessage('done');
+    if (document.body.classList.contains('preview')) setTimeout(start, 1000);
+  }
+  function start() { t0 = performance.now(); requestAnimationFrame(frame); }
+
+  window.MACH = { start };
+  window.__seek = render;
+  setup();
+  addEventListener('resize', setup);
+  if (new URLSearchParams(location.search).has('preview')) {
+    document.body.classList.add('preview');
+    start();
+  } else {
+    render(-1);
+  }
+})();
+</script>
+</body>
+</html>

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Play the MACH intro once per boot: only on the first login after a power-on or restart.
+# Play the active MACH screen once per boot: only on the first login after a power-on or restart.
 # Launched at every login by ~/Library/LaunchAgents/dev.mach.intro.plist (see ./mach install).
 cd "$(dirname "$0")"
 boot=$(sysctl -n kern.boottime | sed -E 's/^\{ sec = ([0-9]+),.*/\1/')
@@ -14,4 +14,4 @@ for _ in $(seq 1 30); do
   sleep 1
 done
 sleep 2
-exec ./bin/mach-intro
+exec ./mach play

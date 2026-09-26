@@ -1,16 +1,95 @@
 #!/bin/bash
-# MACH intro: ./mach (play) · ./mach build · ./mach preview · ./mach install · ./mach uninstall
+# MACH boot screens. Run ./mach help for the commands.
 set -e
 cd "$(dirname "$(readlink -f "$0")")"
 LABEL=dev.mach.intro
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
+PLAYER=bin/mach-player
+
+usage() {
+  cat <<'EOF'
+usage: ./mach [command] [screen]
+
+  play [screen]      play a screen now (default: the active one)
+  list               list screens; * marks the active one
+  use <screen>       set the screen that plays at boot
+  new <screen>       create screens/<screen> from the starter template
+  preview [screen]   open a looping preview in Helium
+  gif [screen]       record docs/<screen>.gif
+  build [screen]     build the player; with a screen, also run its build.py
+  install            build, then play the active screen on the first login after each boot
+  uninstall          stop playing at login
+EOF
+}
+
+active() { cat .active 2>/dev/null || echo strike; }
+
+# Resolve a screen name (or the active one) to its folder, or fail.
+screen_dir() {
+  local name=${1:-$(active)}
+  [ -f "screens/$name/index.html" ] || { echo "no screen named '$name' (try ./mach list)" >&2; exit 1; }
+  echo "screens/$name"
+}
+
+build_player() {
+  mkdir -p bin
+  swiftc -O -swift-version 5 -framework Cocoa -framework WebKit -framework AVFoundation \
+    app/main.swift -o "$PLAYER"
+}
+
 case "${1:-play}" in
-  build)
-    python3 gen_sounds.py
-    swiftc -O -swift-version 5 -framework Cocoa -framework WebKit -framework AVFoundation app/main.swift -o bin/mach-intro
+  play)
+    dir=$(screen_dir "$2")
+    [ -x "$PLAYER" ] || build_player
+    exec "$PLAYER" --screen "$PWD/$dir"
     ;;
-  preview) open -a Helium "file://$PWD/intro/index.html?preview=1" ;;
+  list)
+    cur=$(active)
+    for d in screens/*/; do
+      name=$(basename "$d")
+      desc=$(jq -r '.description // ""' "$d/screen.json" 2>/dev/null)
+      printf '%s %-12s %s\n' "$([ "$name" = "$cur" ] && echo '*' || echo ' ')" "$name" "$desc"
+    done
+    ;;
+  use)
+    [ -n "$2" ] || { usage; exit 1; }
+    screen_dir "$2" >/dev/null
+    echo "$2" > .active
+    echo "active screen: $2"
+    ;;
+  new)
+    [ -n "$2" ] || { usage; exit 1; }
+    [ -e "screens/$2" ] && { echo "screens/$2 already exists" >&2; exit 1; }
+    cp -R templates/basic "screens/$2"
+    sed -i '' "s/__NAME__/$2/g" "screens/$2/index.html" "screens/$2/screen.json"
+    echo "created screens/$2 -- ./mach preview $2 to see it, ./mach use $2 to boot with it"
+    ;;
+  preview)
+    dir=$(screen_dir "$2")
+    open -a Helium "file://$PWD/$dir/index.html?preview=1"
+    ;;
+  gif)
+    dir=$(screen_dir "$2")
+    name=$(basename "$dir")
+    [ -x "$PLAYER" ] || build_player
+    frames=$(mktemp -d)
+    "$PLAYER" --screen "$PWD/$dir" --snap "$frames" --fps 15
+    mkdir -p docs
+    ffmpeg -loglevel error -y -framerate 15 -i "$frames/frame_%04d.png" \
+      -vf "scale=720:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=128[p];[b][p]paletteuse=dither=bayer:bayer_scale=4" \
+      -loop 0 "docs/$name.gif"
+    rm -rf "$frames"
+    echo "wrote docs/$name.gif"
+    ;;
+  build)
+    build_player
+    if [ -n "$2" ]; then
+      dir=$(screen_dir "$2")
+      [ -f "$dir/build.py" ] && python3 "$dir/build.py"
+    fi
+    ;;
   install)
+    build_player
     mkdir -p "${PLIST%/*}"
     cat > "$PLIST" <<PL
 <?xml version="1.0" encoding="UTF-8"?>
@@ -29,12 +108,13 @@ case "${1:-play}" in
 PL
     launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
     launchctl bootstrap "gui/$(id -u)" "$PLIST"
-    echo "installed: plays on the first login after each boot"
+    echo "installed: '$(active)' plays on the first login after each boot"
     ;;
   uninstall)
     launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
     rm -f "$PLIST"
     echo "uninstalled"
     ;;
-  *) exec ./bin/mach-intro ;;
+  help|-h|--help) usage ;;
+  *) usage; exit 1 ;;
 esac

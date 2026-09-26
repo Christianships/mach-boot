@@ -1,15 +1,17 @@
-// mach-intro — plays the MACH boot animation in a transparent, click-through overlay.
-//   mach-intro [--dir <intro folder>]
-//   mach-intro --snap <out dir> --times 0.5,1.0 [--variant ...]   (render stills, no sound)
+// mach-player — plays one MACH boot screen in a transparent, click-through overlay.
+//   mach-player --screen <screen folder>
+//   mach-player --screen <screen folder> --snap <out dir> --fps 15   (render frames, no sound)
+//
+// A screen folder holds index.html (required), screen.json and sound.wav
+// (both optional). See README.md for the contract a screen implements.
 import Cocoa
 import WebKit
 import AVFoundation
 
 struct Options {
-    var variant = "strike"
     var dir: URL
     var snapDir: URL?
-    var times: [Double] = []
+    var fps = 15.0
 
     init() {
         let args = CommandLine.arguments
@@ -17,17 +19,30 @@ struct Options {
             guard let i = args.firstIndex(of: flag), i + 1 < args.count else { return nil }
             return args[i + 1]
         }
-        let exe = URL(fileURLWithPath: args[0]).resolvingSymlinksInPath().deletingLastPathComponent()
-        dir = value("--dir").map { URL(fileURLWithPath: $0) }
-            ?? exe.deletingLastPathComponent().appendingPathComponent("intro")
-        variant = value("--variant") ?? "strike"
+        let root = URL(fileURLWithPath: args[0]).resolvingSymlinksInPath()
+            .deletingLastPathComponent().deletingLastPathComponent()
+        dir = value("--screen").map { URL(fileURLWithPath: $0) }
+            ?? root.appendingPathComponent("screens/strike")
         snapDir = value("--snap").map { URL(fileURLWithPath: $0) }
-        times = (value("--times") ?? "").split(separator: ",").compactMap { Double($0) }
+        fps = value("--fps").flatMap(Double.init) ?? 15
     }
 }
 
-final class Intro: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScriptMessageHandler {
+/// The optional screen.json next to index.html.
+struct Manifest: Decodable {
+    var name: String?
+    var duration: Double?
+
+    static func load(_ dir: URL) -> Manifest {
+        guard let data = try? Data(contentsOf: dir.appendingPathComponent("screen.json")),
+              let m = try? JSONDecoder().decode(Manifest.self, from: data) else { return Manifest() }
+        return m
+    }
+}
+
+final class Player: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScriptMessageHandler {
     let opt = Options()
+    lazy var manifest = Manifest.load(opt.dir)
     var window: NSWindow!
     var web: WKWebView!
     var player: AVAudioPlayer?
@@ -55,52 +70,59 @@ final class Intro: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScri
         window.contentView = web
         window.setFrame(frame, display: true)
 
-        let wav = opt.dir.appendingPathComponent("\(opt.variant).wav")
-        if opt.snapDir == nil, let p = try? AVAudioPlayer(contentsOf: wav) {
+        let page = opt.dir.appendingPathComponent("index.html")
+        if opt.snapDir != nil {
+            window.orderFrontRegardless()
+            var comps = URLComponents(url: page, resolvingAgainstBaseURL: false)!
+            comps.queryItems = [URLQueryItem(name: "seek", value: "0")]
+            web.loadFileURL(comps.url!, allowingReadAccessTo: opt.dir)
+            return
+        }
+
+        if let p = try? AVAudioPlayer(contentsOf: opt.dir.appendingPathComponent("sound.wav")) {
             player = p
             p.prepareToPlay()
         }
-
-        if opt.snapDir != nil {
-            window.orderFrontRegardless()
-            var comps = URLComponents(url: opt.dir.appendingPathComponent("index.html"), resolvingAgainstBaseURL: false)!
-            comps.queryItems = [URLQueryItem(name: "v", value: opt.variant), URLQueryItem(name: "seek", value: "0")]
-            web.loadFileURL(comps.url!, allowingReadAccessTo: opt.dir)
-        } else {
-            web.loadFileURL(opt.dir.appendingPathComponent("index.html"), allowingReadAccessTo: opt.dir)
-        }
-        // Never linger, even if the page fails to load.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 12) { NSApp.terminate(nil) }
+        web.loadFileURL(page, allowingReadAccessTo: opt.dir)
+        // Never linger, even if the page fails to load or never reports done.
+        let limit = (manifest.duration ?? 9) + 3
+        DispatchQueue.main.asyncAfter(deadline: .now() + limit) { NSApp.terminate(nil) }
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         if let out = opt.snapDir {
-            snap(out, Array(opt.times))
+            try? FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
+            let duration = manifest.duration ?? 6
+            let count = Int((duration * opt.fps).rounded(.up))
+            // .recording lets a screen hide preview-only UI (hints, cursors).
+            webView.evaluateJavaScript("document.body.classList.add('preview', 'recording')") { _, _ in
+                self.snap(out, frame: 0, count: count)
+            }
             return
         }
         window.orderFrontRegardless()
-        webView.evaluateJavaScript("MACH.start('\(opt.variant)')")
+        webView.evaluateJavaScript("MACH.start()")
         player?.play()
     }
 
     func userContentController(_ c: WKUserContentController, didReceive message: WKScriptMessage) {
-        guard message.body as? String == "done" else { return }
+        guard opt.snapDir == nil, message.body as? String == "done" else { return }
         let tail = player.map { max(0, $0.duration - $0.currentTime) } ?? 0
         DispatchQueue.main.asyncAfter(deadline: .now() + min(tail, 1.5)) { NSApp.terminate(nil) }
     }
 
-    func snap(_ out: URL, _ times: [Double]) {
-        guard let t = times.first else { NSApp.terminate(nil); return }
-        try? FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
-        let js = "document.body.classList.add('preview'); window.__seek && window.__seek(\(t));"
-        web.evaluateJavaScript(js) { _, _ in
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+    /// Frames are numbered so ffmpeg can read them as a sequence.
+    func snap(_ out: URL, frame: Int, count: Int) {
+        guard frame < count else { NSApp.terminate(nil); return }
+        let t = Double(frame) / opt.fps
+        web.evaluateJavaScript("window.__seek && window.__seek(\(t))") { _, _ in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
                 self.web.takeSnapshot(with: nil) { image, _ in
                     if let image, let tiff = image.tiffRepresentation,
                        let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) {
-                        try? png.write(to: out.appendingPathComponent("\(self.opt.variant)_\(t).png"))
+                        try? png.write(to: out.appendingPathComponent(String(format: "frame_%04d.png", frame)))
                     }
-                    self.snap(out, Array(times.dropFirst()))
+                    self.snap(out, frame: frame + 1, count: count)
                 }
             }
         }
@@ -109,6 +131,6 @@ final class Intro: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScri
 
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
-let intro = Intro()
-app.delegate = intro
+let player = Player()
+app.delegate = player
 app.run()

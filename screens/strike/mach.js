@@ -681,7 +681,7 @@ function done() {
 function start(_variant, withSound) {
   finished = false;
   if (withSound) {
-    audio = audio || new Audio('strike.wav');
+    audio = audio || new Audio('sound.wav');
     audio.currentTime = 0;
     audio.play().catch(() => {});
   }

@@ -7,3 +7,7 @@ __pycache__/
 *.pem
 .DS_Store
 *.log
+
+# build output + local choice of screen
+bin/
+.active

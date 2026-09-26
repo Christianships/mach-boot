@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Build the MACH strike intro soundtrack -> intro/strike.wav.
+"""Build the strike screen's soundtrack -> screens/strike/sound.wav.
 Real CC0 recordings from Freesound (sources/, see CREDITS.txt): F-15 flyover, sonic boom.
 TNT fuse + explosion come from the local Minecraft install. Needs ffmpeg.
-Timings mirror the T table in intro/mach.js."""
+Timings mirror the T table in mach.js. Run via `./mach build strike`."""
 import glob
 import json
 import math
@@ -16,7 +16,7 @@ from array import array
 SR = 44100
 TAU = 2 * math.pi
 HERE = os.path.dirname(os.path.abspath(__file__))
-OUT = os.path.join(HERE, "intro")
+OUT = HERE
 SOURCES = os.path.join(HERE, "sources")
 MC_ASSETS = os.path.expanduser("~/Library/Application Support/minecraft/assets")
 MASTER = 0.19  # fixed output gain (not peak-normalized), so each sound's level below is absolute
@@ -160,7 +160,7 @@ def main():
     lay(tr, load(minecraft_sound("random/explode1")), 0.0, T["IMP"], 4.0, 0.3, fade_in=0.001, fade_out=0.3)
 
     tr.reverb(0.08)
-    tr.write("strike.wav")
+    tr.write("sound.wav")
 
 
 if __name__ == "__main__":
